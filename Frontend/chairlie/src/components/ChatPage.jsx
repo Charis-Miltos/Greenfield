@@ -1,6 +1,7 @@
 import axios from "axios";
 import { useState } from "react";
 import './ChatPage.css';
+import './LoginPage';
 
 function ChatPage() {
     const [userInput, setUserInput] = useState("");
