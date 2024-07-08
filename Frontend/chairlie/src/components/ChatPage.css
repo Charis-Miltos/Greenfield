@@ -1,11 +1,24 @@
 .container {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
+    padding: 10px;
+    height: 95vh;
+}
+
+.interactivePanel {
+    display:grid;
+    grid-template-columns: 1fr 4fr;
+    gap: 10px;
+    height: 90%;
+}
+
+.historyDisplay {
+    min-width: 200px;
+    overflow-y: auto;
+    padding: 10px;
+    border: 1px solid #ccc;
+    margin-bottom: 10px;
 }
 
 .chatDisplay {
-    flex: 1;
     overflow-y: auto;
     padding: 10px;
     border: 1px solid #ccc;
