@@ -14,12 +14,30 @@ const openai = new OpenAI({
 const port = process.env.PORT || 3002;
 const secretKey = process.env.SECRET_KEY;
 
+
 app.use(express.json());
 
 app.use(cors({
     origin:"*"
 }))
 
+//Middleware
+
+const authMiddleware = (req, res, next) => {
+  const token = req.header('Authorization');
+  if (!token) {
+    return res.status(401).json({ error: 'Access denied' });
+  }
+  try {
+    const verified = jwt.verify(token.split(' ')[1], secretKey);
+    req.user = verified;
+    next();
+  } catch (error) {
+    res.status(400).json({ error: 'Invalid token' });
+  }
+};
+
+//Database connection
 mongoose.connect("mongodb+srv://Miltiadis:SHA25@cluster0.5konvqu.mongodb.net/chAIrlie", {
 }).then(() => {
   console.log('Connected to MongoDB');
@@ -27,21 +45,27 @@ mongoose.connect("mongodb+srv://Miltiadis:SHA25@cluster0.5konvqu.mongodb.net/chA
   console.error('Error connecting to MongoDB', err);
 });
 
-
+//Chat Model Schema
 const simpleSchema = new mongoose.Schema({
+  userId: String,
   date: {type: Date, default: Date.now},
   content:
     [{userText: String,
       PAtext: String,
     }]
 });
-
 const SimpleModel = mongoose.model('SimpleModel', simpleSchema);
 
-app.post('/chat/new', async (req, res) => {
+//Chat routes
+app.post('/chat/new', authMiddleware, async (req, res) => {
   try {
-      const newDocument = await SimpleModel.create(req.body); // Create a new document directly
-      res.status(201).json(newDocument);
+      const userId = req.user.id; // Extracted user ID from the token
+      const newChat = new SimpleModel({
+          userId, // Associate the chat with the user ID
+          content: [] // Initialize with empty content or any other default values
+      });
+      await newChat.save();
+      res.status(201).json(newChat);
   } catch (error) {
       res.status(500).json({ error: 'Failed to create document' });
   }
@@ -60,10 +84,20 @@ app.delete('/chat/:id', async (req, res) => {
   }
 });
 
-app.get('/chat', async (req, res) => {
+app.get('/chat/admin', async (req, res) => {
   try {
-      const interactions = await SimpleModel.find();
-      res.json(interactions);
+      const chats = await SimpleModel.find(); // Find chats by user ID
+      res.json(chats);
+  } catch (error) {
+      res.status(500).json({ error: 'Failed to retrieve documents' });
+  }
+});
+
+app.get('/chat', authMiddleware, async (req, res) => {
+  try {
+      const userId = req.user.id; // Extract user ID from the token
+      const chats = await SimpleModel.find({ userId }); // Find chats by user ID
+      res.json(chats);
   } catch (error) {
       res.status(500).json({ error: 'Failed to retrieve documents' });
   }
@@ -71,8 +105,8 @@ app.get('/chat', async (req, res) => {
 
 app.get('/chat/:id', async (req, res) => {
   try {
-      const interactions = await SimpleModel.find({ _id: req.params.id });
-      res.json(interactions);
+      const  chat = await SimpleModel.find({ _id: req.params.id });
+      res.json(chat);
   } catch (error) {
       res.status(500).json({ error: 'Failed to retrieve documents' });
   }
@@ -82,9 +116,6 @@ app.post('/chat/:id', async (req, res) => {
   try {
     const {id} = req.params;
     const { messages } = req.body;
-    console.log(`Received chat ID: ${id}`)
-    console.log(`Messages1: ${JSON.stringify(messages)}`);
-    console.log(`${messages[0].content}`)
     const chatCompletion = await openai.chat.completions.create({
       messages,
       model: 'gpt-3.5-turbo',
@@ -97,38 +128,72 @@ app.post('/chat/:id', async (req, res) => {
       { new: true }
     );
     res.json(chatCompletion);
-    console.log(`${chatCompletion.choices[0].message.role}`)
-    console.log(`${chatCompletion.choices[0].message.content}`)
   } catch (error) {
     res.status(500).send('Error communicating with OpenAI API');
   }
 });
 
-// app.post('/chat/:id', async (req, res) => {
-//     try {
-//       const {id} = req.params;
-//       const { messages } = req.body;
-//       console.log(`Received chat ID: ${id}`)
-//       console.log(`Messages2: (messages)}`);
-      
-//       const chatCompletion = await openai.chat.completions.create({
-//         messages,
-//         model: 'gpt-3.5-turbo',
-//       });
-      
-//       console.log(messages[0].content)
-//       res.json(chatCompletion);
-//       console.log(chatCompletion.choices[0].message.role)
-//       console.log(chatCompletion.choices[0].message.content)
-
-//     } catch (error) {
-//       res.status(500).send('Error communicating with OpenAI API');
-//     }
-//   });
-
 app.get(`/`, (req,res)=>{
     res.send(`Hello world`)
 })
+
+// Authentication
+// User Model Schema
+const UserSchema = new mongoose.Schema({
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+});
+
+const User = mongoose.model('User', UserSchema)
+// Routes
+// Sign Up
+app.post('/api/auth/signup', async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = new User({ email, password: hashedPassword });
+    await user.save();
+    const token = jwt.sign({ id: user._id }, secretKey);
+    res.status(201).json({ token });
+  } catch (error) {
+    res.status(400).json({ error: 'Email already exists' });
+  }
+});
+
+// Login
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(400).json({ error: 'Invalid email or password' });
+    }
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ error: 'Invalid email or password' });
+    }
+    const token = jwt.sign({ id: user._id }, secretKey);
+    res.status(200).json({ token });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get all users
+
+app.get('/api/users', async (req, res) => {
+  try {
+    const users = await User.find();
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to retrieve users' });
+  }
+});
+
+// Protected Route (example usage of authMiddleware)
+app.get('/api/protected', authMiddleware, (req, res) => {
+  res.send('This is a protected route');
+});
 
 app.listen(port, ()=>{
     console.log(`server is running on port ${port}`)

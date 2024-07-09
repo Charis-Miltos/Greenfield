@@ -4,21 +4,27 @@ import './ChatPage.css';
 
 function ChatPage() {
     const [userInput, setUserInput] = useState("");
-    const [userMessages, setUserMessages] = useState([]);
-    const [assistantMessages, setAssistantMessages] = useState([]);
     const [chatId, setChatId] = useState(null);
     const [inputEnabled, setInputEnabled] = useState(false);
     const [listOfChats, setListOfChats] = useState([]);
+    const [selectChat, setSelectChat] = useState(null);
 
     useEffect(() => {
         getAllChats();
     }, []);
 
-    function getAllChats() {
-        axios.get("http://localhost:3002/chat").then(({ data }) => {
-            console.log(data);
+    async function getAllChats() {
+        const token = localStorage.getItem('token'); 
+        try {
+            const { data } = await axios.get('http://localhost:3002/chat', {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
             setListOfChats(data);
-        });
+        } catch (error) {
+            console.error('Error fetching chats:', error);
+        }
     }
 
     function handleUserInput(e) {
@@ -26,16 +32,18 @@ function ChatPage() {
     }
 
     async function createNewChat() {
+        const token = localStorage.getItem('token'); // Retrieve the token from localStorage
         try {
-            const response = await axios.post('http://localhost:3002/chat/new');
+            const response = await axios.post('http://localhost:3002/chat/new', {}, {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
             const newChatId = response.data._id;
             setChatId(newChatId);
-            setUserMessages([]);
-            setAssistantMessages([]);
+            setSelectChat(newChatId);
             setInputEnabled(true);
-            console.log(response.data)
-            console.log(newChatId)
-            getAllChats()
+            getAllChats();
         } catch (error) {
             console.error('Error creating new chat:', error);
         }
@@ -45,48 +53,25 @@ function ChatPage() {
         const userMessage = userInput.trim();
         if (!userMessage) return;
 
-        setUserMessages(prev => [...prev, userMessage]);
-        setUserInput("");
-
         try {
-            const response = await axios.post(`http://localhost:3002/chat/${chatId}`, {
+            await axios.post(`http://localhost:3002/chat/${chatId}`, {
                 messages: [{ role: 'user', content: userMessage }],
             });
-            console.log(response.data);
-            const assistantMessage = response.data.choices[0].message.content;
-            setAssistantMessages(prev => [...prev, assistantMessage]);
+            setUserInput("");
+            getAllChats(); // Refresh chats after sending a message
         } catch (error) {
             console.error('Error:', error);
-            const assistantMessage = "Oops, it appears there was an error"
-            setAssistantMessages(prev => [...prev, assistantMessage])
         }
     }
 
-    function deleteChat(historyId) {
-        axios.delete(`http://localhost:3002/chat/${historyId}`).then(response => {
-            console.log(`Poll deleted:${historyId}`, response.data);
+    async function deleteChat(historyId) {
+        try {
+            await axios.delete(`http://localhost:3002/chat/${historyId}`);
             getAllChats();
-        }).catch(error => {
-            console.error(`There was an error deleting the poll`, error);
-        });
+        } catch (error) {
+            console.error('Error deleting chat:', error);
+        }
     }
-    // async function sendMessage() {
-    //     const userMessage = userInput.trim();
-    //     if (!userMessage || !chatId) return;
-
-    //     setUserMessages(prev => [...prev, userMessage]);
-    //     setUserInput("");
-
-    //     try {
-    //         const response = await axios.post(`http://localhost:3002/chat/${chatId}`, {
-    //             message: { role: 'user', content: userMessage }, - no square brackets
-    //         });
-    //         const assistantMessage = response.data.choices[0].message.content;
-    //         setAssistantMessages(prev => [...prev, assistantMessage]);
-    //     } catch (error) {
-    //         console.error('Error sending message:', error);
-    //     }
-    // }
 
     function handleKeyDown(e) {
         if (e.key === 'Enter') {
@@ -100,21 +85,24 @@ function ChatPage() {
                 <div className="historyDisplay">
                     <div>
                         <button onClick={createNewChat}>New chat</button>
-                        {listOfChats.map((e,i)=>(
-                            <div >
-                                {e.date}
-                                <button onClick={()=>deleteChat(e._id)}>X</button>
+                        {listOfChats.map((e, i) => (
+                            <div key={i}>
+                                <button onClick={() => {
+                                    setSelectChat(e._id);
+                                    setInputEnabled(true);
+                                    setChatId(e._id);
+                                }}>{e.date}</button>
+                                <button onClick={() => deleteChat(e._id)}>X</button>
                             </div>
                         ))}
                     </div>
-                    
                 </div>
                 <div className="chatDisplay">
-                    {userMessages.map((message, index) => (
+                    {listOfChats.find(chat => chat._id === selectChat)?.content.map((message, index) => (
                         <div key={index} className="message">
-                            <p className="userMessage">{message}</p>
-                            {assistantMessages[index] && (
-                                <p className="assistantMessage">{assistantMessages[index]}</p>
+                            <p className="userMessage">{message.userText}</p>
+                            {message.PAtext && (
+                                <p className="assistantMessage">{message.PAtext}</p>
                             )}
                         </div>
                     ))}
